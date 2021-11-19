@@ -56,19 +56,21 @@ fn write_process_memory(pid: Pid, address: u64, data: &mut Vec<u8>) -> Result<us
         data.push(b'\0');
     }
 
-    let data_length = data.len();
-    let data = unsafe { CString::from_vec_unchecked(data.to_vec()) };
-    let data = data.as_ptr();
+    let data: Vec<c_long> = data
+        .chunks_exact(size_of::<c_long>())
+        .map(|chunk| -> c_long {
+            let chunk: [u8; size_of::<c_long>()] = chunk.try_into().unwrap();
+            c_long::from_ne_bytes(chunk)
+        }).collect();
 
-    for i in (0..data_length).step_by(size_of::<c_long>()) {
+    for (i, value) in data.iter().enumerate() {
         let offset = (i as u64) * (size_of::<c_long>() as u64);
         let current_address = address + offset;
-        let current_data_address = (data as u64) + offset;
 
-        unsafe { ptrace::write(pid, current_address as *mut c_void, current_data_address as *mut c_void) }?;
+        unsafe { ptrace::write(pid, current_address as *mut c_void, *value as *mut c_void) }?;
     }
 
-    Ok(data_length)
+    Ok(data.len())
 }
 
 fn main() -> Result<(), Box<dyn error::Error>> {
@@ -82,7 +84,17 @@ fn main() -> Result<(), Box<dyn error::Error>> {
 
     signal::kill(pid, signal::SIGSTOP).expect("failed to stop process");
 
-    let libc_start_code = read_process_memory(pid, libc_address + dlopen_offset, 10)
+    let libc_start_code = read_process_memory(pid, libc_address, 10)
+        .expect("failed to read process memory");
+
+    for l in libc_start_code.iter() {
+        println!("0x{:x}", l);
+    }
+
+    println!();
+    write_process_memory(pid, libc_address, &mut b"AAAAAAA".to_vec())?;
+
+    let libc_start_code = read_process_memory(pid, libc_address, 10)
         .expect("failed to read process memory");
 
     for l in libc_start_code.iter() {
