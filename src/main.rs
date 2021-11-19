@@ -1,4 +1,3 @@
-use std::ffi::CString;
 use std::ffi::c_void;
 use std::fs;
 use std::error;
@@ -7,6 +6,7 @@ use std::mem::size_of;
 use std::os::raw::c_long;
 use nix::sys::ptrace;
 use nix::sys::signal;
+use nix::sys::wait;
 use regex::Regex;
 use object::Object;
 use nix::unistd::Pid;
@@ -84,22 +84,21 @@ fn main() -> Result<(), Box<dyn error::Error>> {
 
     signal::kill(pid, signal::SIGSTOP).expect("failed to stop process");
 
-    let libc_start_code = read_process_memory(pid, libc_address, 10)
-        .expect("failed to read process memory");
-
-    for l in libc_start_code.iter() {
-        println!("0x{:x}", l);
+    if wait::waitpid(pid, None)? != wait::WaitStatus::Stopped(pid, signal::SIGSTOP) {
+        return Err("process didn't stopped")?;
     }
-
-    println!();
-    write_process_memory(pid, libc_address, &mut b"AAAAAAA".to_vec())?;
 
     let libc_start_code = read_process_memory(pid, libc_address, 10)
         .expect("failed to read process memory");
 
-    for l in libc_start_code.iter() {
-        println!("0x{:x}", l);
-    }
+    write_process_memory(pid, libc_address, &mut b"ABCDEFG".to_vec())?;
+
+    let libc_start_code = read_process_memory(pid, libc_address, 10)
+        .expect("failed to read process memory");
+
+    ptrace::detach(pid, None).expect("failed to detach process");
+
+    signal::kill(pid, signal::SIGCONT)?;
 
     Ok(())
 }
