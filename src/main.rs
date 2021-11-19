@@ -107,11 +107,7 @@ fn remote_call_dlopen(pid: Pid, lib_path: String) -> Result<(), Box<dyn error::E
 
     ptrace::cont(pid, None)?;
 
-    let shit = wait::waitpid(pid, None)?;
-
-    let regs = ptrace::getregs(pid)?;
-
-    if shit != wait::WaitStatus::Stopped(pid, signal::SIGSTOP) {
+    if wait::waitpid(pid, None)? != wait::WaitStatus::Stopped(pid, signal::SIGTRAP) {
         return Err("process didn't stopped correctly")?;
     }
 
@@ -119,29 +115,15 @@ fn remote_call_dlopen(pid: Pid, lib_path: String) -> Result<(), Box<dyn error::E
 
     ptrace::setregs(pid, process_orignal_regs)?;
 
-    ptrace::cont(pid, signal::SIGCONT)?;
-
     Ok(())
 }
 
 fn main() -> Result<(), Box<dyn error::Error>> {
-    let pid = Pid::from_raw(16542);
+    let pid = Pid::from_raw(32297);
 
     ptrace::attach(pid).expect("failed to attach process");
 
-    signal::kill(pid, signal::SIGSTOP).expect("failed to stop process");
-
-    if wait::waitpid(pid, None)? != wait::WaitStatus::Stopped(pid, signal::SIGSTOP) {
-        return Err("process didn't stopped")?;
-    }
-
     remote_call_dlopen(pid, "/home/shahak/user_space_hooks/a.so".to_string())?;
-
-    signal::kill(pid, signal::SIGSTOP).expect("failed to stop process");
-
-    if wait::waitpid(pid, None)? != wait::WaitStatus::Stopped(pid, signal::SIGSTOP) {
-        return Err("process didn't stopped")?;
-    }
 
     ptrace::detach(pid, None).expect("failed to detach process");
 
