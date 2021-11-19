@@ -51,7 +51,8 @@ fn read_process_memory(pid: Pid, address: u64, length: u64) -> Result<Vec<u8>, B
     Ok(words_from_memory.iter().flat_map(|x| -> [u8; size_of::<c_long>()] { x.to_ne_bytes() }).collect())
 }
 
-fn write_process_memory(pid: Pid, address: u64, data: &mut Vec<u8>) -> Result<usize, Box<dyn error::Error>> {
+fn write_process_memory(pid: Pid, address: u64, new_memory: Vec<u8>) -> Result<usize, Box<dyn error::Error>> {
+    let mut data = new_memory.clone();
     while data.len() % size_of::<c_long>() != 0 {
         data.push(b'\0');
     }
@@ -73,12 +74,58 @@ fn write_process_memory(pid: Pid, address: u64, data: &mut Vec<u8>) -> Result<us
     Ok(data.len())
 }
 
-fn main() -> Result<(), Box<dyn error::Error>> {
-    let pid = Pid::from_raw(1704);
-
+// assume process is stopped for now
+fn remote_call_dlopen(pid: Pid, lib_path: String) -> Result<(), Box<dyn error::Error>> {
     let (libc_address, libc_path) = get_process_libc(pid)?;
 
     let dlopen_offset = get_symbol_offset(&libc_path, "__libc_dlopen_mode")?;
+    let dlopen_address = libc_address + dlopen_offset;
+
+    let executeable_address = libc_address + get_symbol_offset(&libc_path, "qsort_r")?;
+
+    let process_orignal_regs = ptrace::getregs(pid)?;
+
+    let mut process_current_regs = process_orignal_regs.clone();
+
+    let shellcode: Vec<u8> = vec![ 0xFF, 0xD0, 0xCC ];
+    let lib_path: Vec<u8> = lib_path.into_bytes();
+
+    let mut data: Vec<u8> = vec![];
+    data.extend(shellcode.iter());
+    data.extend(lib_path.iter());
+    data.push(0);
+
+    let orignal_memory = read_process_memory(pid, executeable_address, data.len() as u64)?;
+    write_process_memory(pid, executeable_address, data)?;
+
+    process_current_regs.rip = executeable_address;
+    process_current_regs.rax = dlopen_address;
+    process_current_regs.rdi = executeable_address + (shellcode.len() as u64);
+    process_current_regs.rsi = 0x80000002;
+
+    ptrace::setregs(pid, process_current_regs)?;
+
+    ptrace::cont(pid, None)?;
+
+    let shit = wait::waitpid(pid, None)?;
+
+    let regs = ptrace::getregs(pid)?;
+
+    if shit != wait::WaitStatus::Stopped(pid, signal::SIGSTOP) {
+        return Err("process didn't stopped correctly")?;
+    }
+
+    write_process_memory(pid, executeable_address, orignal_memory)?;
+
+    ptrace::setregs(pid, process_orignal_regs)?;
+
+    ptrace::cont(pid, signal::SIGCONT)?;
+
+    Ok(())
+}
+
+fn main() -> Result<(), Box<dyn error::Error>> {
+    let pid = Pid::from_raw(16542);
 
     ptrace::attach(pid).expect("failed to attach process");
 
@@ -88,13 +135,13 @@ fn main() -> Result<(), Box<dyn error::Error>> {
         return Err("process didn't stopped")?;
     }
 
-    let libc_start_code = read_process_memory(pid, libc_address, 10)
-        .expect("failed to read process memory");
+    remote_call_dlopen(pid, "/home/shahak/user_space_hooks/a.so".to_string())?;
 
-    write_process_memory(pid, libc_address, &mut b"ABCDEFG".to_vec())?;
+    signal::kill(pid, signal::SIGSTOP).expect("failed to stop process");
 
-    let libc_start_code = read_process_memory(pid, libc_address, 10)
-        .expect("failed to read process memory");
+    if wait::waitpid(pid, None)? != wait::WaitStatus::Stopped(pid, signal::SIGSTOP) {
+        return Err("process didn't stopped")?;
+    }
 
     ptrace::detach(pid, None).expect("failed to detach process");
 
