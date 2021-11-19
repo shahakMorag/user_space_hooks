@@ -75,7 +75,7 @@ fn write_process_memory(pid: Pid, address: u64, new_memory: Vec<u8>) -> Result<u
 }
 
 // assume process is stopped for now
-fn remote_call_dlopen(pid: Pid, lib_path: String) -> Result<(), Box<dyn error::Error>> {
+fn remote_load_library(pid: Pid, lib_path: String) -> Result<(), Box<dyn error::Error>> {
     let (libc_address, libc_path) = get_process_libc(pid)?;
 
     let dlopen_offset = get_symbol_offset(&libc_path, "__libc_dlopen_mode")?;
@@ -123,7 +123,7 @@ fn main() -> Result<(), Box<dyn error::Error>> {
 
     ptrace::attach(pid).expect("failed to attach process");
 
-    remote_call_dlopen(pid, "/home/shahak/user_space_hooks/a.so".to_string())?;
+    remote_load_library(pid, "/home/shahak/user_space_hooks/a.so".to_string())?;
 
     ptrace::detach(pid, None).expect("failed to detach process");
 
