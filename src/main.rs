@@ -1,15 +1,15 @@
 use std::ffi::c_void;
-use std::fs;
-use std::error;
-use std::i64;
 use std::mem::size_of;
 use std::os::raw::c_ulong;
-use nix::sys::ptrace;
-use nix::sys::signal;
-use nix::sys::wait;
+use std::{ fs, error, i64 };
+
 use regex::Regex;
+
 use object::Object;
+
 use nix::unistd::Pid;
+use nix::sys::{ ptrace, signal, wait };
+
 use clap::Parser;
 
 fn get_symbol_offset(object_path: &str, symbol: &str) -> Result<c_ulong, Box<dyn error::Error>> {
@@ -19,7 +19,7 @@ fn get_symbol_offset(object_path: &str, symbol: &str) -> Result<c_ulong, Box<dyn
 
     for object_symbol in obj_file.dynamic_symbols() {
         if Some(symbol) == (object_symbol.1.name()) {
-            return Ok(object_symbol.1.address());
+            return Ok(object_symbol.1.address().try_into().unwrap());
         }
     }
 
