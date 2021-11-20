@@ -10,6 +10,7 @@ use nix::sys::wait;
 use regex::Regex;
 use object::Object;
 use nix::unistd::Pid;
+use clap::Parser;
 
 fn get_symbol_offset(object_path: &str, symbol: &str) -> Result<u64, Box<dyn error::Error>> {
     let bin_data = fs::read(object_path)?;
@@ -118,12 +119,22 @@ fn remote_load_library(pid: Pid, lib_path: String) -> Result<(), Box<dyn error::
     Ok(())
 }
 
+#[derive(Parser)]
+struct Arguments {
+    #[clap(short)]
+    pid: i32,
+    #[clap(short)]
+    lib_path: String,
+}
+
 fn main() -> Result<(), Box<dyn error::Error>> {
-    let pid = Pid::from_raw(32297);
+    let args: Arguments = Arguments::parse();
+
+    let pid = Pid::from_raw(args.pid);
 
     ptrace::attach(pid).expect("failed to attach process");
 
-    remote_load_library(pid, "/home/shahak/user_space_hooks/a.so".to_string())?;
+    remote_load_library(pid, args.lib_path)?;
 
     ptrace::detach(pid, None).expect("failed to detach process");
 
