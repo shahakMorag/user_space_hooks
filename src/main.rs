@@ -75,6 +75,11 @@ fn write_process_memory(pid: Pid, address: c_ulong, new_memory: Vec<u8>) -> Resu
     Ok(data.len())
 }
 
+#[cfg(all(
+    target_os = "linux",
+    any(all(target_arch = "x86_64",
+            any(target_env = "gnu", target_env = "musl")))
+))]
 fn remote_run_dlopen(pid: Pid,
     lib_path: String,
     executeable_address: c_ulong,
