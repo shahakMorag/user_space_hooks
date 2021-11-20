@@ -3,7 +3,7 @@ use std::fs;
 use std::error;
 use std::i64;
 use std::mem::size_of;
-use std::os::raw::c_long;
+use std::os::raw::c_ulong;
 use nix::sys::ptrace;
 use nix::sys::signal;
 use nix::sys::wait;
@@ -12,7 +12,7 @@ use object::Object;
 use nix::unistd::Pid;
 use clap::Parser;
 
-fn get_symbol_offset(object_path: &str, symbol: &str) -> Result<u64, Box<dyn error::Error>> {
+fn get_symbol_offset(object_path: &str, symbol: &str) -> Result<c_ulong, Box<dyn error::Error>> {
     let bin_data = fs::read(object_path)?;
 
     let obj_file = object::File::parse(&*bin_data)?;
@@ -26,12 +26,12 @@ fn get_symbol_offset(object_path: &str, symbol: &str) -> Result<u64, Box<dyn err
     Err("libc dlopen not found")?
 }
 
-fn get_process_libc(pid: Pid) -> Result<(u64, String), Box<dyn error::Error>> {
+fn get_process_libc(pid: Pid) -> Result<(c_ulong, String), Box<dyn error::Error>> {
     let process_maps = fs::read_to_string(format!("/proc/{}/maps", pid))?;
 
     let libc_line_regex = Regex::new(r"(?m)^([0-9a-fA-F]+)-.* (/.*\blibc\b.*so)$")?;
     for cap in libc_line_regex.captures_iter(&process_maps) {
-        let address = i64::from_str_radix(&cap[1], 16)? as u64;
+        let address = i64::from_str_radix(&cap[1], 16)? as c_ulong;
 
         return Ok((address, cap[2].to_string()));
     }
@@ -39,34 +39,34 @@ fn get_process_libc(pid: Pid) -> Result<(u64, String), Box<dyn error::Error>> {
     Err("libc wasn't found")?
 }
 
-fn read_process_memory(pid: Pid, address: u64, length: u64) -> Result<Vec<u8>, Box<dyn error::Error>> {
-    let mut words_from_memory = Vec::<c_long>::new();
+fn read_process_memory(pid: Pid, address: c_ulong, length: c_ulong) -> Result<Vec<u8>, Box<dyn error::Error>> {
+    let mut words_from_memory = Vec::<c_ulong>::new();
 
-    for i in (0..length).step_by(size_of::<c_long>()) {
-        let offset = (i as u64) * (size_of::<c_long>() as u64);
+    for i in (0..length).step_by(size_of::<c_ulong>()) {
+        let offset = (i as c_ulong) * (size_of::<c_ulong>() as c_ulong);
         let current_address = address + offset;
 
-        words_from_memory.push(ptrace::read(pid, current_address as *mut c_void)?);
+        words_from_memory.push(ptrace::read(pid, current_address as *mut c_void)? as c_ulong);
     }
 
-    Ok(words_from_memory.iter().flat_map(|x| -> [u8; size_of::<c_long>()] { x.to_ne_bytes() }).collect())
+    Ok(words_from_memory.iter().flat_map(|x| -> [u8; size_of::<c_ulong>()] { x.to_ne_bytes() }).collect())
 }
 
-fn write_process_memory(pid: Pid, address: u64, new_memory: Vec<u8>) -> Result<usize, Box<dyn error::Error>> {
+fn write_process_memory(pid: Pid, address: c_ulong, new_memory: Vec<u8>) -> Result<usize, Box<dyn error::Error>> {
     let mut data = new_memory.clone();
-    while data.len() % size_of::<c_long>() != 0 {
+    while data.len() % size_of::<c_ulong>() != 0 {
         data.push(b'\0');
     }
 
-    let data: Vec<c_long> = data
-        .chunks_exact(size_of::<c_long>())
-        .map(|chunk| -> c_long {
-            let chunk: [u8; size_of::<c_long>()] = chunk.try_into().unwrap();
-            c_long::from_ne_bytes(chunk)
+    let data: Vec<c_ulong> = data
+        .chunks_exact(size_of::<c_ulong>())
+        .map(|chunk| -> c_ulong {
+            let chunk: [u8; size_of::<c_ulong>()] = chunk.try_into().unwrap();
+            c_ulong::from_ne_bytes(chunk)
         }).collect();
 
     for (i, value) in data.iter().enumerate() {
-        let offset = (i as u64) * (size_of::<c_long>() as u64);
+        let offset = (i as c_ulong) * (size_of::<c_ulong>() as c_ulong);
         let current_address = address + offset;
 
         unsafe { ptrace::write(pid, current_address as *mut c_void, *value as *mut c_void) }?;
@@ -96,12 +96,12 @@ fn remote_load_library(pid: Pid, lib_path: String) -> Result<(), Box<dyn error::
     data.extend(lib_path.iter());
     data.push(0);
 
-    let orignal_memory = read_process_memory(pid, executeable_address, data.len() as u64)?;
+    let orignal_memory = read_process_memory(pid, executeable_address, data.len() as c_ulong)?;
     write_process_memory(pid, executeable_address, data)?;
 
     process_current_regs.rip = executeable_address;
     process_current_regs.rax = dlopen_address;
-    process_current_regs.rdi = executeable_address + (shellcode.len() as u64);
+    process_current_regs.rdi = executeable_address + (shellcode.len() as c_ulong);
     process_current_regs.rsi = 0x80000002;
 
     ptrace::setregs(pid, process_current_regs)?;
