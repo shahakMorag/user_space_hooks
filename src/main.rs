@@ -75,15 +75,10 @@ fn write_process_memory(pid: Pid, address: c_ulong, new_memory: Vec<u8>) -> Resu
     Ok(data.len())
 }
 
-// assume process is stopped for now
-fn remote_load_library(pid: Pid, lib_path: String) -> Result<(), Box<dyn error::Error>> {
-    let (libc_address, libc_path) = get_process_libc(pid)?;
-
-    let dlopen_offset = get_symbol_offset(&libc_path, "__libc_dlopen_mode")?;
-    let dlopen_address = libc_address + dlopen_offset;
-
-    let executeable_address = libc_address + get_symbol_offset(&libc_path, "qsort_r")?;
-
+fn remote_run_dlopen(pid: Pid,
+    lib_path: String,
+    executeable_address: c_ulong,
+    dlopen_address: c_ulong) -> Result<(), Box<dyn error::Error>> {
     let process_orignal_regs = ptrace::getregs(pid)?;
 
     let mut process_current_regs = process_orignal_regs.clone();
@@ -117,6 +112,18 @@ fn remote_load_library(pid: Pid, lib_path: String) -> Result<(), Box<dyn error::
     ptrace::setregs(pid, process_orignal_regs)?;
 
     Ok(())
+}
+
+// assume process is stopped for now
+fn remote_load_library(pid: Pid, lib_path: String) -> Result<(), Box<dyn error::Error>> {
+    let (libc_address, libc_path) = get_process_libc(pid)?;
+
+    let dlopen_offset = get_symbol_offset(&libc_path, "__libc_dlopen_mode")?;
+    let dlopen_address = libc_address + dlopen_offset;
+
+    let executeable_address = libc_address + get_symbol_offset(&libc_path, "qsort_r")?;
+
+    remote_run_dlopen(pid, lib_path, executeable_address, dlopen_address)
 }
 
 #[derive(Parser)]
